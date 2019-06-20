@@ -63,9 +63,8 @@ result.close()
 
 result = engine.execute("select * from employee")
 
-# This will raise a StopIteration Error at the end
-# for row in result:
-#     print(row)
+for row in result:
+    print(row)
 
 ### slide:: p
 # the fetchall() method is a shortcut to producing a list

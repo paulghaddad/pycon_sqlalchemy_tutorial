@@ -18,13 +18,13 @@ user_table = Table('user', metadata,
 # Table provides a single point of information regarding
 # the structure of a table in a schema.
 
-user_table.name
+print(user_table.name)
 
 ### slide:: i
 # The .c. attribute of Table is an associative array
 # of Column objects, keyed on name.
 
-user_table.c.name
+print(user_table.c.name)
 
 ### slide:: i
 # It's a bit like a Python dictionary but not totally.
@@ -34,13 +34,13 @@ print(user_table.c)
 ### slide::
 # Column itself has information about each Column, such as
 # name and type
-user_table.c.name.name
-user_table.c.name.type
+print(user_table.c.name.name)
+print(user_table.c.name.type)
 
 ### slide:: i
 # Table has other information available, such as the collection
 # of columns which comprise the table's primary key.
-user_table.primary_key
+print(user_table.primary_key)
 
 ### slide::
 # The Table object is at the core of the SQL expression
@@ -51,7 +51,7 @@ print(user_table.select())
 # Table and MetaData objects can be used to generate a schema
 # in a database.
 from sqlalchemy import create_engine
-engine = create_engine("sqlite://")
+engine = create_engine("sqlite://", echo=True)
 metadata.create_all(engine)
 
 ### slide:: p
@@ -125,11 +125,19 @@ metadata.create_all(engine)
 #      owner_id INTEGER,
 #      FOREIGN KEY owner_id REFERENCES user(id)
 # )
-#
+
+network = Table('network', metadata,
+                Column('network_id', Integer, primary_key=True),
+                Column('name', String(100), nullable=False),
+                Column('created_at', DateTime, nullable=False),
+                Column('owner_id', Integer, ForeignKey('user.id')))
+
 # 2. Then emit metadata.create_all(), which will
 # emit CREATE TABLE for this table (it will skip
 # those that already exist).
-#
+
+metadata.create_all(engine)
+
 # The necessary types are imported here:
 
 from sqlalchemy import Integer, String, DateTime
@@ -138,6 +146,9 @@ from sqlalchemy import Integer, String, DateTime
 ### title:: Reflection
 # 'reflection' refers to loading Table objects based on
 # reading from an existing database.
+
+# we need to create a new metadata object because the other one already has the
+# user table
 metadata2 = MetaData()
 
 user_reflected = Table('user', metadata2, autoload=True, autoload_with=engine)
@@ -159,11 +170,11 @@ inspector.get_table_names()
 
 ### slide:: p
 # column information
-inspector.get_columns('address')
+print(inspector.get_columns('address'))
 
 ### slide:: p
 # constraints
-inspector.get_foreign_keys('address')
+print(inspector.get_foreign_keys('address'))
 
 ### slide::
 ### title:: Exercises
@@ -171,9 +182,15 @@ inspector.get_foreign_keys('address')
 # 1. Using 'metadata2', reflect the "network" table in the same way
 #    we just did 'user', then display the columns (or bonus, display
 #    just the column names)
-#
+
+network_reflected = Table('network', metadata2, autoload=True, autoload_with=engine)
+
+print(network_reflected.columns)
+
 # 2. Using "inspector", print a list of all table names that
 #    include a column called "story_id"
-#
 
-### slide::
+for table in inspector.get_table_names():
+    for column in inspector.get_columns(table):
+        if column['name'] == 'story_id':
+            print(table)
