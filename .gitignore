@@ -1,0 +1,17 @@
+doc/build
+*.pyc
+*.swp
+*.orig
+build
+tmp
+dist
+.venv
+venv
+.venv3
+.coverage
+.DS_Store
+.buildinfo
+*.db
+handout.pdf
+handout
+sw
