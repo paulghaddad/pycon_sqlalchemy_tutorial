@@ -14,7 +14,7 @@ user_table = Table('user', metadata,
 # new SQLite database and generate the table.
 
 from sqlalchemy import create_engine
-engine = create_engine("sqlite://")
+engine = create_engine("sqlite://", echo=True)
 metadata.create_all(engine)
 
 ### slide::
@@ -28,6 +28,7 @@ user_table.c.username
 # which exhibit custom Python expression behavior.
 
 user_table.c.username == 'ed'
+
 
 ### slide:: i
 # They become SQL when evaluated as a string.
@@ -101,7 +102,7 @@ print(expression.compile(dialect=postgresql.dialect()))
 # parameters.
 
 compiled = expression.compile()
-compiled.params
+print(compiled.params)
 
 ### slide::
 # The "bound" parameters are extracted when we execute()
@@ -116,11 +117,19 @@ engine.execute(
 # "user_table.c.id", and "user_table.c.username":
 #
 # 1. user.fullname = 'ed'
-#
+
+expression = user_table.c.username == 'ed'
+print(expression.compile())
+
 # 2. user.fullname = 'ed' AND user.id > 5
-#
+
+expression = and_(user_table.c.username == 'ed', user_table.c.id > 5)
+print(expression.compile())
+
 # 3. user.username = 'edward' OR (user.fullname = 'ed' AND user.id > 5)
-#
+
+expression = or_(user_table.c.username == 'edward', and_(user_table.c.fullname == 'ed', user_table.c.id > 5))
+print(expression)
 
 
 ### slide:: p
@@ -130,15 +139,16 @@ insert_stmt = user_table.insert().values(username='ed', fullname='Ed Jones')
 
 conn = engine.connect()
 result = conn.execute(insert_stmt)
+print(result)
 
 ### slide:: i
 # executing an insert() gives us the "last inserted id"
-result.inserted_primary_key
+print(result.inserted_primary_key)
 
 ### slide:: p
 # insert() and other DML can run multiple parameters at once.
 
-conn.execute(user_table.insert(), [
+result = conn.execute(user_table.insert(), [
     {'username': 'jack', 'fullname': 'Jack Burger'},
     {'username': 'wendy', 'fullname': 'Wendy Weathersmith'}
 ])
@@ -192,15 +202,26 @@ print(conn.execute(select_stmt).fetchall())
 # statement:
 #
 # INSERT INTO user (username, fullname) VALUES ('dilbert', 'Dilbert Jones')
-#
+
+expression = user_table.insert().values(username='dilbert', fullname='Dilbert Jones')
+result = conn.execute(expression)
+
 # 2. What is the value of 'user.id' for the above INSERT statement?
-#
+
+print(result.inserted_primary_key)
+
 # 3. Using "select([user_table])", execute this SELECT:
 #
 # SELECT id, username, fullname FROM user WHERE username = 'wendy' OR
 #   username = 'dilbert' ORDER BY fullname
-#
-#
+
+
+expression = select([user_table]).where(or_(user_table.c.username == 'wendy',
+                                            user_table.c.username ==
+                                            'dilbert')).order_by(user_table.c.fullname)
+
+for row in conn.execute(expression):
+    print(row)
 
 ### slide:: p
 ### title:: Joins / Foreign Keys
@@ -290,7 +311,9 @@ username_plus_count = select([
 
 ### slide:: i
 
-conn.execute(username_plus_count).fetchall()
+results = conn.execute(username_plus_count).fetchall()
+for row in results:
+    print(row)
 
 ### slide::
 ### title:: Exercises
@@ -300,6 +323,17 @@ conn.execute(username_plus_count).fetchall()
 #   ON user.id = address.user_id WHERE username='ed'
 #   ORDER BY email_address
 #
+
+expression = select([
+                   user_table.c.fullname, address_table.c.email_address
+             ]).select_from(
+                 user_table.join(address_table, user_table.c.id == address_table.c.user_id)
+             ).order_by(address_table.c.email_address)
+
+results = conn.execute(expression)
+for row in results:
+    print(row)
+
 
 ### slide::
 ### title:: Scalar selects, updates, deletes
@@ -316,7 +350,10 @@ print(address_sel)
 # specify it using as_scalar()
 
 select_stmt = select([user_table.c.username, address_sel.as_scalar()])
-conn.execute(select_stmt).fetchall()
+results = conn.execute(select_stmt).fetchall()
+for row in results:
+    print(row)
+
 
 ### slide:: p
 # to round out INSERT and SELECT, this is an UPDATE
@@ -326,6 +363,7 @@ update_stmt = address_table.update().\
                     where(address_table.c.email_address == "jack@yahoo.com")
 
 result = conn.execute(update_stmt)
+print(result.rowcount)
 
 ### slide:: p
 # an UPDATE can also use expressions based on other columns
@@ -335,9 +373,12 @@ update_stmt = user_table.update().\
                             " " + user_table.c.fullname)
 
 result = conn.execute(update_stmt)
+print(result.last_updated_params())
 
 ### slide:: i
-conn.execute(select([user_table])).fetchall()
+results = conn.execute(select([user_table])).fetchall()
+for row in results:
+    print(row)
 
 ### slide:: p
 # and this is a DELETE
@@ -346,11 +387,12 @@ delete_stmt = address_table.delete().\
                 where(address_table.c.email_address == "ed@ed.com")
 
 result = conn.execute(delete_stmt)
+print(result.rowcount)
 
 ### slide:: i
 # UPDATE and DELETE have a "rowcount", number of rows matched
 # by the WHERE clause.
-result.rowcount
+# result.rowcount
 
 
 ### slide::
@@ -358,9 +400,17 @@ result.rowcount
 # 1. Execute this UPDATE - keep the "result" that's returned
 #
 #    UPDATE user SET fullname='Ed Jones' where username='ed'
-#
+
+update_statement = user_table.update().\
+                        values(fullname='Ed Jones').\
+                        where(user_table.c.username == 'ed')
+
+result = conn.execute(update_statement)
+
 # 2. how many rows did the above statement update?
-#
+
+print(result.rowcount)
+
 # 3. Tricky bonus!  Combine update() along with select().as_scalar()
 #    to execute this UPDATE:
 #
@@ -369,4 +419,11 @@ result.rowcount
 #       WHERE username IN ('jack', 'wendy')
 #
 
-### slide::
+email_subquery = select([address_table.c.email_address]).\
+                      where(address_table.c.user_id == user_table.c.id).as_scalar()
+
+update_statement = user_table.update().\
+                        values(fullname=or_(user_table.c.fullname, email_subquery)).\
+                        where(user_table.c.username.in_(['jack', 'wendy']))
+
+result = conn.execute(update_statement)
