@@ -9,7 +9,25 @@ Base = declarative_base()
 ### slide::
 # a basic mapping.  __repr__() is optional.
 
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Numeric
+from sqlalchemy.orm import relationship
+
+from sqlalchemy import ForeignKey
+from sqlalchemy.orm import relationship
+
+# Moving Address up here so it works later on
+
+class Address(Base):
+    __tablename__ = 'address'
+
+    id = Column(Integer, primary_key=True)
+    email_address = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey('user.id'))
+
+    user = relationship("User", back_populates="addresses")
+
+    def __repr__(self):
+        return "<Address(%r)>" % self.email_address
 
 class User(Base):
     __tablename__ = 'user'
@@ -17,6 +35,8 @@ class User(Base):
     id = Column(Integer, primary_key=True)
     name = Column(String)
     fullname = Column(String)
+
+    addresses = relationship("Address", back_populates="user")
 
     def __repr__(self):
         return "<User(%r, %r)>" % (
@@ -27,6 +47,7 @@ class User(Base):
 # the User class now has a Table object associated with it.
 
 User.__table__
+
 
 ### slide::
 # The Mapper object mediates the relationship between User
@@ -50,8 +71,9 @@ print(ed_user.id)
 ### slide:: p
 # The MetaData object is here too, available from the Base.
 
+
 from sqlalchemy import create_engine
-engine = create_engine('sqlite://')
+engine = create_engine('sqlite://', echo=True)
 Base.metadata.create_all(engine)
 
 ### slide::
@@ -64,6 +86,8 @@ session = Session(bind=engine)
 ### slide::
 # new objects are placed into the Session using add().
 session.add(ed_user)
+
+session.new
 
 ### slide:: pi
 # the Session will *flush* *pending* objects
@@ -81,6 +105,11 @@ print(ed_user.id)
 # so "ed_user" and "our_user" are the *same* object
 
 ed_user is our_user
+# this is the exact same python object because it is in the
+# same session; we'd get different ids if they came from different sessions
+
+print(id(ed_user))
+print(id(our_user))
 
 ### slide::
 # Add more objects to be pending for flush.
@@ -115,7 +144,8 @@ session.commit()
 ### slide:: p
 # After a commit, theres no transaction.  The Session
 # *invalidates* all data, so that accessing them will automatically
-# start a *new* transaction and re-load from the database.
+# start a *new* transaction and re-load from the database. You can turn this
+# behavior off by using expire_on_commit=False on the session
 
 ed_user.fullname
 
@@ -147,7 +177,8 @@ fake_user in session
 ### slide:: p
 # and the data is gone from the database too.
 
-session.query(User).filter(User.name.in_(['ed', 'fakeuser'])).all()
+results = session.query(User).filter(User.name.in_(['ed', 'fakeuser'])).all()
+print(len(results)) # only ed should be in the database
 
 ### slide::
 ### title:: Exercises - Basic Mapping
@@ -167,12 +198,27 @@ session.query(User).filter(User.name.in_(['ed', 'fakeuser'])).all()
 #
 #
 
+class Network(Base):
+    __tablename__ = 'network'
+
+    network_id = Column(Integer, primary_key=True)
+    name = Column(String(100), nullable=False)
+
+Base.metadata.create_all(engine)
+
+network_1 = Network(name='google')
+network_2 = Network(name='apple')
+
+session.add_all([network_1, network_2])
+session.commit()
+
 ### slide::
 ### title:: ORM Querying
 # The attributes on our mapped class act like Column objects, and
 # produce SQL expressions.
 
 print(User.name == "ed")
+print(User.name.property.columns[0])
 
 ### slide:: p
 # These SQL expressions are compatible with the select() object
@@ -180,6 +226,7 @@ print(User.name == "ed")
 
 from sqlalchemy import select
 
+# this is the Core version of doing a query with a little ORM mixed in
 sel = select([User.name, User.fullname]).\
         where(User.name == 'ed').\
         order_by(User.id)
@@ -199,18 +246,22 @@ query.all()
 ### slide:: p
 # Query can also return individual columns
 
+# you get named tuples back here
 for name, fullname in session.query(User.name, User.fullname):
     print(name, fullname)
 
 ### slide:: p
 # and can mix entities / columns together.
 
+# the session.query() object does not actually hit the db until you iterate over # it
 for row in session.query(User, User.name):
     print(row.User, row.name)
 
 ### slide:: p
 # Array indexes will OFFSET to that index and LIMIT by one...
 
+# this will actually alter the SQL emitted, not just return a single element
+# from the entire user set
 u = session.query(User).order_by(User.id)[2]
 print(u)
 
@@ -274,14 +325,14 @@ query.one()
 ### slide:: p
 # if there's not one(), you get an error
 
-query = session.query(User).filter_by(fullname='nonexistent')
-query.one()
+# query = session.query(User).filter_by(fullname='nonexistent')
+# query.one()
 
 ### slide:: p
 # if there's more than one(), you get an error
 
-query = session.query(User)
-query.one()
+# query = session.query(User)
+# query.one()
 
 ### slide::
 ### title:: Exercises - ORM Querying
@@ -295,25 +346,24 @@ query.one()
 #
 # 4. return only the second row of the Query from #3.
 
+query_1 = session.query(User.fullname).order_by(User.fullname)
+for user in query_1:
+    print(user)
+
+query_2 = session.query(User).filter(User.name.in_(['mary', 'ed']))
+for user in query_2:
+    print(user)
+
+result = query_2.limit(1).offset(1).first()
+print(result)
+
 
 ### slide::
 ### title:: Joins and relationships
 # A new class called Address, with a *many-to-one* relationship to User.
 
-from sqlalchemy import ForeignKey
-from sqlalchemy.orm import relationship
+# Moved to the top to work with back_populates
 
-class Address(Base):
-    __tablename__ = 'address'
-
-    id = Column(Integer, primary_key=True)
-    email_address = Column(String, nullable=False)
-    user_id = Column(Integer, ForeignKey('user.id'))
-
-    user = relationship("User", backref="addresses")
-
-    def __repr__(self):
-        return "<Address(%r)>" % self.email_address
 
 ### slide:: p
 # create the new table.
@@ -324,7 +374,8 @@ Base.metadata.create_all(engine)
 # a new User object also gains an empty "addresses" collection now.
 
 jack = User(name='jack', fullname='Jack Bean')
-jack.addresses
+print(jack.addresses)
+
 
 ### slide::
 # populate this collection with new Address objects.
@@ -338,14 +389,14 @@ jack.addresses = [
 ### slide::
 # the "backref" sets up Address.user for each User.address.
 
-jack.addresses[1]
-jack.addresses[1].user
+print(jack.addresses[1])
+print(jack.addresses[1].user)
 
 ### slide::
 # adding User->jack will *cascade* each Address into the Session as well.
 
 session.add(jack)
-session.new
+print(session.new)
 
 ### slide:: p
 # commit.
@@ -354,10 +405,18 @@ session.commit()
 ### slide:: p
 # After expiration, jack.addresses emits a *lazy load* when first
 # accessed.
+
+# Let's do jack first (no SQL for addresses)
+print(jack)
+
+# But when we access .addresses, the lazy load emits SQL for the related # addresses
+# print("Lazy Load at work!")
 jack.addresses
 
 ### slide:: i
 # the collection stays in memory until the transaction ends.
+
+# No SQL is emitted the second time we access the relationship
 jack.addresses
 
 ### slide:: p
@@ -365,9 +424,13 @@ jack.addresses
 # not primary / foreign key values.
 
 fred = session.query(User).filter_by(name='fred').one()
+
+print(jack.addresses) # 3 addresses
+# change one of Jack's addresses to Fred
 jack.addresses[1].user = fred
 
-fred.addresses
+print(jack.addresses) # 2 addresses
+print(fred.addresses) # 1 address
 
 session.commit()
 
@@ -403,6 +466,12 @@ session.query(User.name).join(User.addresses).\
 ### slide:: p
 # we can specify an explicit FROM using select_from().
 
+# By default, join will use the left-most entity (ie User in the above query as
+# the table to join from: SELECT * FROM users INNER JOIN addresses...
+
+# By using select_from, you can flip this to join from addresses:
+    # SELECT * FROM addresses INNER JOIN users
+
 session.query(User, Address).select_from(Address).join(Address.user).all()
 
 ### slide:: p
@@ -433,8 +502,11 @@ subq = session.query(
                 group_by(User.id).\
                 subquery()
 
-session.query(User.name, func.coalesce(subq.c.count, 0)).\
+results = session.query(User.name, func.coalesce(subq.c.count, 0)).\
             outerjoin(subq, User.id == subq.c.user_id).all()
+
+for row in results:
+    print(row)
 
 ### slide::
 ### title:: Exercises
@@ -443,10 +515,26 @@ session.query(User.name, func.coalesce(subq.c.count, 0)).\
 #    SELECT user.name, address.email_address FROM user
 #    JOIN address ON user.id=address.user_id WHERE
 #    address.email_address='j25@yahoo.com'
-#
+
+results = session.query(User.name, Address.email_address).\
+        join(Address, User.id == Address.user_id).\
+        filter(Address.email_address == 'j25@yahoo.com')
+
+for row in results:
+    print(row)
+
+
 # 2. Tricky Bonus!  Select all pairs of distinct user names.
 #    Hint: "... ON user_alias1.name < user_alias2.name"
 #
+
+u1, u2 = aliased(User), aliased(User)
+
+query = session.query(u1.name, u2.name).join(u2, u1.name != u2.name)
+
+for row in query:
+    print(row)
+
 
 ### slide:: p
 ### title:: Eager Loading
@@ -464,6 +552,7 @@ session.rollback()  # so we can see the load happen again.
 
 from sqlalchemy.orm import subqueryload
 
+# Does two queries: one a subquery and another query to join against it
 for user in session.query(User).options(subqueryload(User.addresses)):
     print(user, user.addresses)
 
@@ -519,6 +608,9 @@ User.addresses.property.cascade = "all, delete, delete-orphan"
 ### slide:: p
 # Removing an Address from a User will now delete it.
 
+# Using delete cascade with passive_deletes is more efficient because it doesn't
+# have to load all the records in memory
+
 fred = session.query(User).filter_by(name='fred').one()
 
 del fred.addresses[0]
@@ -537,12 +629,31 @@ session.commit()
 #      id = Column(Integer, primary_key=True)
 #      owner = Column(String(50), nullable=False)
 #      balance = Column(Numeric, default=0)
-#
+
+class Account(Base):
+    __tablename__ = 'account'
+
+    id = Column(Integer, primary_key=True)
+    owner = Column(String(50), nullable=False)
+    balance = Column(Numeric, default=0)
+
+    transactions = relationship('Transaction', back_populates='account',
+                                cascade="all, delete, delete-orphan")
+
 # 2. Create a class "Transaction", with table "transaction":
 #      * Integer primary key
 #      * numeric "amount" column
 #      * Integer "account_id" column with ForeignKey('account.id')
-#
+
+class Transaction(Base):
+    __tablename__ = 'transaction'
+
+    id = Column(Integer, primary_key=True)
+    amount = Column(Numeric, nullable=False)
+    account_id = Column(Integer, ForeignKey('account.id'))
+
+    account = relationship('Account', back_populates='transactions')
+
 # 3. Add a relationship() on Transaction named "account", which refers
 #    to "Account", and has a backref called "transactions".
 #
@@ -554,15 +665,30 @@ session.commit()
 #      Transaction(amount=4500, account=a1)
 #      Transaction(amount=6000, account=a2)
 #      Transaction(amount=4000, account=a2)
-#
+
+Base.metadata.create_all(engine)
+a1 = Account(owner='Jack Jones', balance=5000)
+a2 = Account(owner='Ed Rendell', balance=10000)
+t1 = Transaction(amount=500, account=a1)
+t2 = Transaction(amount=4500, account=a1)
+t3 = Transaction(amount=6000, account=a2)
+t4 = Transaction(amount=4000, account=a2)
+
+session.add_all([a1, a2, t1, t2, t3])
+session.commit()
+
+
 # 5. Produce a report that shows:
 #     * account owner
 #     * account balance
 #     * summation of transaction amounts per account (should match balance)
 #       A column can be summed using func.sum(Transaction.amount)
 #
-from sqlalchemy import Integer, String, Numeric
+# from sqlalchemy import Integer, String, Numeric
 
-### slide::
+query = session.query(Account.owner, Account.balance, func.sum(Transaction.amount)).\
+        join(Transaction, Account.id == Transaction.account_id).\
+        group_by(Account.owner)
 
-
+for row in query:
+    print(row)
